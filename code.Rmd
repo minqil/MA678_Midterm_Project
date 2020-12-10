@@ -1,0 +1,414 @@
+---
+title: "Midterm Project"
+author: "Minqi Li"
+date: "12/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(magrittr)
+library(tidyverse)
+library(Hmisc)
+library(stringr)
+library(corrplot)
+library(arm)
+library(rstanarm)
+library(bayesplot)
+library(cowplot)
+```
+
+# Abstract
+
+As sharing economy as a new business mode becomes more and more popular, Airbnb provides a rental online platform for hosts to accommodate guests with short-term lodging and tourism-related activities which differs from traditional hotel industry. Because of various lodging information offered, we build a multilevel model to explore what factors are related to price. Our model shows that room type, reviews in per month, days available for renting, the number of guests have an influence on price. By improving this model in the next step, it is beneficial for hosts to fix a price for their rooms.
+
+# Introduction
+
+Airbnb provides a rental online platform for hosts to accommodate guests with short-term lodging and tourism-related activities. Because it provides users with various lodging information such as various room type, location and hosts which is different from traditional hotel industry. Therefore, I want to explore what factors are related to price. 
+
+In this report, I downloaded data from [inside airbnb](http://insideairbnb.com/get-the-data.html) which provides us with publicly available information about a city's Airbnb's listings around the word. For each city's dataset, there are 75 variables mostly about information of hosts, houses and reviews which are scraped in October,2020. I chose 10 typical cities in United States to explore the relationship between price and other variables. The 10 cities is Boston, Chicago, Denver, Hawaii, Los Angeles, New Orleans, New York, Portland, Seattle and Washington, D.C.
+
+```{r, include=FALSE}
+# read data
+# boston<-read.csv("boston.csv",header = T)
+# chicago<-read.csv("chicago.csv",header = T)
+# denver<-read.csv("denver.csv",header = T)
+# hawaii<-read.csv("hawaii.csv",header = T)
+# la<-read.csv("LA.csv",header = T)
+# no<-read.csv("new_orleans.csv",header = T)
+# ny<-read.csv("NY.csv",header = T)
+# portland<-read.csv("portland.csv",header = T)
+# seattle<-read.csv("seattle.csv",header = T)
+# washington<-read.csv("washington.csv",header = T)
+
+# add city message
+# set.seed(1)
+# boston %<>% mutate(city="Boston") %>% sample_n(1000)
+# chicago %<>% mutate(city="Chicago") %>% sample_n(1000)
+# denver %<>% mutate(city="Denver") %>% sample_n(1000)
+# hawaii %<>% mutate(city="Hawaii") %>% sample_n(1000)
+# la %<>% mutate(city="Los Angeles") %>% sample_n(1000)
+# no %<>% mutate(city="New Orleans") %>% sample_n(1000)
+# ny %<>% mutate(city="New York") %>% sample_n(1000)
+# portland %<>% mutate(city="Portland") %>% sample_n(1000)
+# seattle %<>% mutate(city="Sattle") %>% sample_n(1000)
+# washington %<>% mutate(city="Washington, D.C.") %>% sample_n(1000)
+
+# airbnb<-rbind(boston,chicago,denver,hawaii,la,no,ny,portland,seattle,washington)
+
+airbnb <- read.csv("airbnb.csv",header = T)
+```
+
+# Method
+## Data Cleaning
+
+* Subseted the data by choosing  1000 pieces of listings from each city randomly, because the function of stan_lmer took a long time so that I needed to reduce data. 
+
+* Computed the proportion of missing values for each column and removed the columns that the proportion was greater than 0.3.
+
+* Removed the useless variables based on the description of variables.
+
+* Removed the rows that the number of reviews in 12 months was 0, because I thought the condition which doesn't have reviews in 12 months is not active.
+
+* Replaced missing value with individual suitable values.
+
+* Changed the variables from percentage to decimal, from t/f to 1/0, from character to integer or factor.
+
+```{r,include=FALSE}
+# compute the proportion of missing values for each column
+na_col<-rep(NA,75)
+for (i in 1:75) {
+  na_col[i]<-mean(is.na(airbnb[,i]))
+}
+
+
+# Remove the columns that the proportion of missing values is more than 0.3
+airbnb1<-airbnb[,-which(na_col>0.3)]
+
+
+
+# Based on the description of variables, I remove the useless variables.
+airbnb1 <- subset(airbnb1, select = -c(X,id,host_id,host_since,listing_url,scrape_id,last_scraped,name,description,neighborhood_overview,picture_url,host_url,host_name,host_location,host_about,host_thumbnail_url,host_picture_url,host_neighbourhood,host_listings_count,host_verifications,host_has_profile_pic,neighbourhood,property_type,bathrooms_text,amenities,minimum_minimum_nights,maximum_minimum_nights,minimum_maximum_nights,maximum_maximum_nights,calendar_last_scraped,calculated_host_listings_count_entire_homes,calculated_host_listings_count_private_rooms,calculated_host_listings_count_shared_rooms,calculated_host_listings_count,first_review,last_review,license))
+
+# I think the condition which doesn't have reviews in 12 months is not active, so I remove the rows that the number of reviews in 12 months is 0.
+airbnb1 <- airbnb1[-which(airbnb1$number_of_reviews_ltm == 0),]
+
+# compute the proportion of missing values for each column
+na_col1<-rep(NA,36)
+for (i in 1:36) {
+  na_col1[i]<-mean(is.na(airbnb1[,i]))
+}
+which(na_col1>0) ## The columns that have NA is 5,12,13,27,28,29,30,31,32,33.
+
+# replace NA
+## Because host as least has one listing, I replace NA with 1.
+airbnb1$host_total_listings_count <- impute(airbnb1$host_total_listings_count,1)
+## replace the rest with 0
+airbnb1[,12] <- impute(airbnb1[,12],0)
+airbnb1[,13] <- impute(airbnb1[,13],0)
+airbnb1[,27] <- impute(airbnb1[,27],0)
+airbnb1[,28] <- impute(airbnb1[,28],0)
+airbnb1[,29] <- impute(airbnb1[,29],0)
+airbnb1[,30] <- impute(airbnb1[,30],0)
+airbnb1[,31] <- impute(airbnb1[,31],0)
+airbnb1[,32] <- impute(airbnb1[,32],0)
+airbnb1[,33] <- impute(airbnb1[,33],0)
+
+
+# change the variables from percentage to decimal
+## host_response_rate
+airbnb1$host_response_rate[airbnb1$host_response_rate=="N/A"]<-"0%"
+airbnb1$host_response_rate<-as.numeric(str_sub(airbnb1$host_response_rate,1,-2))/100
+## host_acceptance_rate
+airbnb1$host_acceptance_rate[airbnb1$host_acceptance_rate=="N/A"]<-"0%"
+airbnb1$host_acceptance_rate<-as.numeric(str_sub(airbnb1$host_acceptance_rate,1,-2))/100
+
+# change the variables from t/f to 1/0
+airbnb1$host_is_superhost[airbnb1$host_is_superhost=="f"]<-0
+airbnb1$host_is_superhost[airbnb1$host_is_superhost=="t"]<-1
+
+airbnb1$host_identity_verified[airbnb1$host_identity_verified=="f"]<-0
+airbnb1$host_identity_verified[airbnb1$host_identity_verified=="t"]<-1
+
+airbnb1$has_availability[airbnb1$has_availability=="f"]<-0
+airbnb1$has_availability[airbnb1$has_availability=="t"]<-1
+
+airbnb1$instant_bookable[airbnb1$instant_bookable=="f"]<-0
+airbnb1$instant_bookable[airbnb1$instant_bookable=="t"]<-1
+
+# remove $ 
+airbnb1$price<-str_sub(airbnb1$price,2L,-1L)
+airbnb1$price<-as.integer(airbnb1$price)
+
+
+# change the variables from character to integer
+airbnb1$host_is_superhost<-as.integer(airbnb1$host_is_superhost)
+airbnb1$host_identity_verified<-as.integer(airbnb1$host_identity_verified)
+airbnb1$has_availability<-as.integer(airbnb1$has_availability)
+airbnb1$instant_bookable<-as.integer(airbnb1$instant_bookable)
+
+# change the variables from character to factor
+airbnb1$host_response_time[airbnb1$host_response_time=="N/A"]<-"no response"
+airbnb1$host_response_time[airbnb1$host_response_time==""]<-"no response"
+airbnb1$host_response_time<-factor(airbnb1$host_response_time,levels = c("no response","within an hour","within a few hours","within a day","a few days or more"),labels =c("no response","within an hour","within a few hours","within a day","a few days or more"))
+
+airbnb1$neighbourhood_cleansed<-factor(airbnb1$neighbourhood_cleansed)
+
+airbnb1$room_type<-factor(airbnb1$room_type, levels = c("Hotel room", "Entire home/apt", "Private room", "Shared room"))
+
+rownames(airbnb1) <- seq(1,nrow(airbnb1),1)
+```
+
+## Correlation Analysis
+
+Firstly, I did a correlation analysis after removing character variables. Based on it, I selected the variables which had the largest 10 absolute value of correlation coefficients between price and other variables. The 10 variables are accommodates, bedrooms, beds, reviews_per_month, number_of_reviews, number_of_reviews_ltm, availability_30, availability_365, number_of_reviews_l30d, minimum_nights. The following is the plot of correlation matrix. 
+
+```{r}
+airbnb_cor<-subset(airbnb1,select=-c(host_response_time,neighbourhood_cleansed,room_type,city,longitude,latitude,has_availability)) 
+airbnb_cor<-na.omit(airbnb_cor,cols="price")
+correlation<-round(cor(airbnb_cor),2)
+correlation1<-as.matrix(correlation)
+
+## plot
+corrplot::corrplot(correlation1,method = "color", addCoef.col = "grey", addCoefasPercent=TRUE,tl.col = "black", tl.srt = 45, tl.cex=0.8, number.cex = 0.5, title = "The Correlation Matrix among variables")
+```
+
+Then, I did a correlation analysis of selected variables. According to it, I removed the redundant variables whose correlation coefficients with variables which have greater correlation coefficients in the first step is greater than 0.5. Therefore, the numeric variables I selected are accommodates, reviews_per_month, availability_30, availability_365. The following is the plot of correlation matrix.
+
+```{r}
+## select the top 10 absolute value of correlation coefficients between price and other variables 
+airbnb_cor_price<-subset(airbnb1,select=c(accommodates,bedrooms,beds,reviews_per_month,number_of_reviews,number_of_reviews_ltm,availability_30,availability_365,number_of_reviews_l30d,minimum_nights))
+correlation_price<-round(cor(airbnb_cor_price),2)
+
+corrplot::corrplot(correlation_price,method="color",addCoef.col="grey",addCoefasPercent=TRUE,tl.col = "black", tl.srt = 45,tl.cex=0.8,number.cex = 0.5,title = "The Correlation Matrix among selected variables")
+```
+
+## Variables Selection and Transformation
+
+Finally, because I thought room type had an influence on price, I also added it into predictors. The final dataset included 6394 pieces of listings and 7 variables across 10 cities. Because I wanted to expore the relationship between price and other variables in the same city, I decided to use a linear multilevel model with random intercepts. I chose price as outcome, accommodates, reviews_per_month, availability_30, availability_365,room_type as predictors and city as random intercept.
+
+Besides, because the scale of price, availability_30 and availability_365 was large, I took the log of price and deal with availability_30 and availability_365 in the z-score normalization method.
+
+```{r}
+## select variables that the correlation coefficients are less than 0.5--accommodates, reviews_per_month, availability_30, availability_365, review_scores_location
+
+data<-subset(airbnb1,select=c(accommodates, reviews_per_month, availability_30, availability_365,room_type,city,price))
+
+data<-na.omit(data)
+data %<>% mutate(price_log=log(price))
+data %<>% mutate(availability_30_scale=(availability_30-mean(availability_30))/sd(availability_30),
+                 availability_365_scale=(availability_365-mean(availability_365))/sd(availability_365))
+```
+
+## EDA
+### The plot of density estimate
+
+```{r}
+# the plot of density estimate
+ggplot(data=data)+
+  geom_density(alpha=0.3)+
+  aes(x=price_log,color=city)+
+    facet_wrap(~city)+theme(legend.position="none")+geom_rug()+
+  geom_vline(xintercept=mean(data$price_log),color="red",lty=2)+
+  xlab("log(price)")+
+  ggtitle("The Plot of Density Estimate")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Based on the plot of density estimate, we could find that the distribution of price in each city has a few differences. For example, the peak in each city has the biggest difference.
+
+### The Scatterplot and Linear Regression for each city
+
+```{r}
+# choose the maximum correlation coefficient between price and other variable--accommodates
+
+ggplot(data=data,aes(x=accommodates,y=price_log,color=city))+
+  geom_point(size=0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~city)+
+  ylab("log(price)")+
+  ggtitle("The Number of Guests vs Log(price) for Each City")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+Because *accommodates* has maximum correlation coefficient with price, I made a scatterplot and linear regression between accommodates and price_log for each city. Based on the plot, the points are distributed in a linear trend.
+
+In conclusion, based on explortary data analysis, there is no problem with model and feature selection. 
+
+```{r}
+# choose the maximum correlation coefficient between price and other variable
+
+ggplot(data=data,aes(x=reviews_per_month,y=price_log,color=city))+
+  geom_point(size=0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~city)+
+  ylab("log(price)")+
+  ggtitle("Reviews in per month vs Log(price) for Each City")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+# choose the maximum correlation coefficient between price and other variable
+
+ggplot(data=data,aes(x=availability_30,y=price_log,color=city))+
+  geom_point(size=0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~city)+
+  ylab("log(price)")+
+  ggtitle("Days Available for 30 Days vs Log(price) for Each City")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+# choose the maximum correlation coefficient between price and other variable
+
+ggplot(data=data,aes(x=availability_365,y=price_log,color=city))+
+  geom_point(size=0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~city)+
+  ylab("log(price)")+
+  ggtitle("Days Available for a Year vs Log(price) for Each City")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+# choose the maximum correlation coefficient between price and other variable
+
+ggplot(data=data,aes(x=room_type,y=price_log,color=city))+
+  geom_point(size=0.5)+
+  geom_smooth(method = "lm")+
+  facet_wrap(~city)+
+  ylab("log(price)")+
+  ggtitle("Room Type vs Log(price) for Each City")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+# Results
+## Model Coefficients & Estimates
+
+```{r}
+fit1 <- stan_lmer (price_log ~ accommodates + reviews_per_month + availability_30_scale + availability_365_scale + room_type + (1 | city),data=data,refresh=0)
+print (fit1)
+
+#fit1<-readRDS("fit1.rds")
+#print(fit1)
+```
+
+```{r}
+# Draw out the model's simulated estimates
+sims= as.matrix(fit1) 
+
+#Clean up the column names 
+cityname=unique(data$city)
+
+for(i in 1:length(unique(data$city))) {
+  colnames(sims)[i+8] = cityname[i]
+}
+colnames(sims)[1] = "intercept"
+colnames(sims)[20] = "sigma[city(intercept)]"
+
+
+#Make a data frame to put in coefficients
+coefdisplay = data.frame(names=rep(NA,ncol(sims)),med=rep(NA,ncol(sims)),upper=rep(NA,ncol(sims)),lower=rep(NA,ncol(sims)))
+
+#Use for loops to draw out estimates and names for each variable
+for(i in 1:ncol(sims)){
+  coefdisplay$names[i] = colnames(sims)[i]
+  coefdisplay$med[i] = median(sims[,i])
+  coefdisplay$upper[i] = median(sims[,i]) + 2*mad(sims[,i])
+  coefdisplay$lower[i] = median(sims[,i]) - 2*mad(sims[,i])
+}
+
+# plot of fixed effect
+
+p1<- ggplot(coefdisplay[2:8,]) + aes(x=med,y=names) + geom_point() +
+  geom_errorbar(aes(xmin=lower,xmax=upper),width=0) + 
+  geom_text(aes(label=round(med,2)),nudge_x= -0.01,nudge_y = 0.35, size=3) +
+  ggtitle("Fixed Effects") +
+  xlab("Estimate") + ylab("Variables") + theme_bw() +
+  geom_vline(aes(xintercept=0),linetype="dashed")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p2 <- ggplot(coefdisplay[1,]) + aes(x=med,y=names) + geom_point() +
+  geom_errorbar(aes(xmin=lower,xmax=upper),width=0) + 
+  geom_text(aes(label=round(med,2)),nudge_x= 0.009,nudge_y = 0.2, size=3) +
+  xlab("Estimate") + ylab("Variables") + theme_bw() +
+  geom_vline(aes(xintercept=0),linetype="dashed")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+cowplot::plot_grid(p1, p2,nrow = 2, rel_heights = c(4,1))
+```
+The plot shows the model's fixed effect and their 95% confidence interval. *Accommodates*, *availability_30_scale* has a positive effect on price. *reviews_per_month*, *availability_365_scale* have a negative effect on price. *Room_type* has the biggest impact on price. The order of price of room type from the highest to the lowest is entire home/apartment, hotel room, private room, shared room. All the coefficients of variables are statistically sigificant. 
+
+
+```{r}
+# plot of random effect
+ggplot(coefdisplay[12:21,]) + aes(x=med,y=names) + geom_point() +
+  geom_errorbar(aes(xmin=lower,xmax=upper),width=0) + 
+  geom_text(aes(label=round(med,2)),nudge_x= -0.007,nudge_y = 0.3, size=3) +
+  ggtitle("Random Effects") +
+  xlab("Estimate") + ylab("Cities") + theme_bw() +
+  geom_vline(aes(xintercept=0),linetype="dashed")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+## Residual plot
+
+```{r, message=FALSE, warning=FALSE, results="hide"}
+ggplot() + aes(x=fitted(fit1),y=resid(fit1),color=data$city,label=data$city)+
+  geom_point(size=0.8) + 
+  scale_color_brewer(palette="Paired")+
+  geom_abline(intercept = 0,slope = 0,color="red")+
+  labs(color="City")+
+  xlab("Fitted Values") + ylab("Residuals")+
+  ggtitle("Residuals vs Fitted Values")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Based on the residual plot, most data is fitted well. A few outliers are mostly in Washington, D.C. and Chicago.
+
+## Posterior predictive checks
+
+```{r}
+set.seed(1)
+pred <- posterior_predict(fit1,draws = 1000)
+n_sims<-nrow(pred)
+subset<-sample(n_sims,100) 
+check<-ppc_dens_overlay(data$price_log,pred[subset,])
+check
+```
+
+From the plot of posterior predictive checks, the model doesn't capture the data very well around the peak and the part of high price. This is because that the peak has a big difference in different city which could be seen in the plot of density estimate of EDA part. Besides, the part of high price is more different than the part of low price among cities.
+
+# Discussion
+
+The model results mostly lines up people's perception. Foe example, *availability_30_scale* has a positive effect on price. On the contrary, *availability_365_scale* has a negative effect on price. It conforms the rule that the earlier we reserve rooms, the cheaper the price is. Besides, *reviews_per_month* has a negative effect on price which means that people prefer cost-effective rooms.
+
+However, in this model, I didn't add neighborhood into predictors which may have a big influence on price. This is because that the cleanliness score of location is hardly correlated with price in the correlation analysis. And the character variable of neighborhood has too many factors so that it is difficult to add it into predictors.
+
+Therefore, in the next step, I try to add the factor of neighborhood into predictors to explore the relationship between location and price. What's more, I need to find and remove outliers in the residual plot to make the model fit better.
+
+# References
+
+1. Inside Airbnb [online]. Available from:   http://insideairbnb.com/get-the-data.html [accessed 3 December 2020]
+
+2. Wikipedia [online]. Available from: https://en.wikipedia.org/wiki/Airbnb [accessed 9 December 2020]
+
+3. Hadley Wickham (2019). tidyverse: Easily Install and Load the 'Tidyverse'. R package version 1.3.0. https://cloud.r-project.org/package=tidyverse
+
+4. Jonah Gabry, Imad Ali, Sam Brilleman, etc (2020). rstanarm: Bayesian Applied Regression Modeling via Stan. R package version 2.21.1. https://cloud.r-project.org/web/packages/rstanarm/index.html
+
+5. Taiyun We, Viliam Simko, Michael Levy, etc (2017). corrplot: Visualization of a Correlation Matrix. R package version 0.84. https://cran.r-project.org/web/packages/corrplot/index.html
+
+
+
+
+
+
+
+
+
